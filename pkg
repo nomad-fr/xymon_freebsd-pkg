@@ -1,0 +1,94 @@
+#!/usr/local/bin/zsh
+
+# Revision History:
+# 1. Michel Le Cocq, original
+
+TEST='pkg'
+
+for h in `jls -n name | cut -d'=' -f2; hostname`
+do    
+        if [[ $h == $(hostname) ]]; 
+	then 
+	    pkg_option=''; 
+	    cmd_option=''
+        else
+	    pkg_option='-j'$h
+	    cmd_option='/usr/local/bin/sudo '
+	fi
+
+        DISPCOLOR='green'
+        e=''
+
+	CMD=$(/usr/local/bin/sudo /usr/sbin/pkg $pkg_option upgrade --dry-run 2> /tmp/xymon-pkg-upgrade-$h)
+
+        #if [ $? -ne 0 ]
+        #then
+        #    DISPCOLOR='yellow'
+        #fi
+        CHECK=$(echo $CMD | grep 'Your packages are up to date')
+
+        if [[ ( ! -z "$CHECK" ) && ( $DISPCOLOR == "green" ) ]]
+        then 
+            DISPCOLOR='green'
+        else 
+            DISPCOLOR='yellow'
+            for p in `echo $CMD | awk '/\t/' | grep -v Reinstalling | cut -d':' -f1 | cut -d' ' -f2`
+            do 
+                pkg updating -f /poudriere/ports/default/UPDATING $p >> /tmp/pkg
+            done
+            if [[ -e /tmp/pkg ]]
+            then
+                e=`cat /tmp/pkg`
+                rm /tmp/pkg
+            fi
+        fi
+
+	res_audit=$(/usr/local/bin/sudo pkg $pkg_option audit -F 2> /tmp/xymon-pkg-upgrade-$h)
+
+        if [[ $? -ne 0 ]]; then DISPCOLOR='red'; fi
+
+
+        if [[ ! -n `cat /tmp/xymon-pkg-upgrade-$h` ]]
+        then
+            t=`cat /tmp/xymon-pkg-upgrade-$h`
+        fi
+        rm /tmp/xymon-pkg-upgrade-$h
+
+        res_audit=$(pkg $pkg_option audit -F)
+        if [[ $? -ne 0 ]]; then DISPCOLOR='red'; fi
+
+        res_repo=$(/usr/local/bin/sudo /usr/sbin/pkg $pkg_option -vv |tee /tmp/list_repo | grep -n Repositories |IFS=':' read a b; tail -n +$a /tmp/list_repo | grep '{' | cut -d':' -f1; rm /tmp/list_repo)
+        version=$(/usr/local/bin/sudo /usr/sbin/pkg $pkg_option -v)
+
+        # What: Sent out the final bb message to hobbit server.
+        $BB $BBDISP "status $h.$TEST $DISPCOLOR `date` - pkg : $version\
+        $(echo;
+        echo "-----------------------------------------------------------------------------";
+        echo "Repositories";
+        echo;
+        echo "$res_repo";
+        echo;
+        if [[ -n "$t" ]]; then
+        echo "-----------------------------------------------------------------------------";
+        echo "Error/Warning";
+        echo;
+        echo "$t";
+        echo; fi;
+        if [[ -n "$CMD" ]]; then
+        echo "-----------------------------------------------------------------------------";
+        echo "pkg upgrade";
+        echo;
+        echo "$CMD"; \
+        echo; fi;
+        if [[ -n "$res_audit" ]]; then
+        echo "-----------------------------------------------------------------------------";
+        echo "pkg audit";
+        echo;
+        echo "$res_audit";
+        echo; fi
+        if [[ -n "$e" ]]; then
+        echo "-----------------------------------------------------------------------------";
+        echo "UPDATING"; 
+        echo; echo "$e" ; fi;
+        echo;echo)"
+done
